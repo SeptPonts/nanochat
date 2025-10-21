@@ -16,20 +16,21 @@ python -m scripts.chat_rl
 torchrun --standalone --nproc_per_node=8 -m scripts.chat_rl -- --run=default
 """
 
-import os
 import itertools
-import wandb
+import os
+
 import torch
 import torch.distributed as dist
+import wandb
 
+from nanochat.checkpoint_manager import load_model, save_checkpoint
 from nanochat.common import (
-    compute_init,
-    compute_cleanup,
-    print0,
-    get_base_dir,
     DummyWandb,
+    compute_cleanup,
+    compute_init,
+    get_base_dir,
+    print0,
 )
-from nanochat.checkpoint_manager import save_checkpoint, load_model
 from nanochat.engine import Engine
 from nanochat.report import get_report
 from tasks.gsm8k import GSM8K
@@ -59,7 +60,7 @@ eval_examples = 400  # number of examples used for evaluating pass@k
 config_keys = [
     k
     for k, v in globals().items()
-    if not k.startswith("_") and isinstance(v, (int, float, bool, str))
+    if not k.startswith("_") and isinstance(v, int | float | bool | str)
 ]
 exec(
     open(os.path.join("nanochat", "configurator.py")).read()

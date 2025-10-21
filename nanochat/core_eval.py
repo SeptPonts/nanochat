@@ -8,9 +8,9 @@ TODOs:
 
 import random
 
-from jinja2 import Template
 import torch
 import torch.distributed as dist
+from jinja2 import Template
 
 # -----------------------------------------------------------------------------
 # Prompt rendering utilities

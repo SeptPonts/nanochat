@@ -10,20 +10,20 @@ torchrun --nproc_per_node=8 base_eval.py
 The script will print the CORE metric to the console.
 """
 
+import json
 import os
+import random
 import sys
 import time
-import json
-import random
-import yaml
 
 import pandas as pd
 import torch
+import yaml
 
-from nanochat.common import compute_init, compute_cleanup, print0, get_base_dir
-from nanochat.tokenizer import HuggingFaceTokenizer
 from nanochat.checkpoint_manager import load_model
+from nanochat.common import compute_cleanup, compute_init, get_base_dir, print0
 from nanochat.core_eval import evaluate_task
+from nanochat.tokenizer import HuggingFaceTokenizer
 
 # -----------------------------------------------------------------------------
 # nanoChat specific function dealing with I/O etc.
@@ -41,7 +41,7 @@ def evaluate_model(model, tokenizer, device, max_per_task=-1):
     config_path = os.path.join(eval_bundle_dir, "core.yaml")
     data_base_path = os.path.join(eval_bundle_dir, "eval_data")
     eval_meta_data = os.path.join(eval_bundle_dir, "eval_meta_data.csv")
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         config = yaml.safe_load(f)
     tasks = config["icl_tasks"]
     eval_metadata = pd.read_csv(eval_meta_data)
@@ -65,7 +65,7 @@ def evaluate_model(model, tokenizer, device, max_per_task=-1):
 
         # Load data for this task
         data_path = os.path.join(data_base_path, task_meta["dataset_uri"])
-        with open(data_path, "r") as f:
+        with open(data_path) as f:
             data = [json.loads(line.strip()) for line in f]
 
         # shuffle the data because in many cases it appears ordered but we want
@@ -178,7 +178,7 @@ def main():
         print0("=" * 80)
         print0(f"Model: {model_name}")
         print0("=" * 80)
-        with open(output_csv_path, "r") as f:
+        with open(output_csv_path) as f:
             print0(f.read())
 
     # Log to report

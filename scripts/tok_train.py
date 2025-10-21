@@ -3,14 +3,16 @@ Train a tokenizer using the HuggingFace Tokenizers library.
 In the style of GPT-4 tokenizer.
 """
 
+import argparse
 import os
 import time
-import argparse
+
 import torch
-from nanochat.tokenizer import RustBPETokenizer
+
 from nanochat.common import get_base_dir
 from nanochat.dataset import parquets_iter_batched
 from nanochat.report import get_report
+from nanochat.tokenizer import RustBPETokenizer
 
 # -----------------------------------------------------------------------------
 # Parse command line arguments

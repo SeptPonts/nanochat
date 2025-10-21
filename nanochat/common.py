@@ -2,9 +2,10 @@
 Common utilities for nanochat.
 """
 
+import logging
 import os
 import re
-import logging
+
 import torch
 import torch.distributed as dist
 

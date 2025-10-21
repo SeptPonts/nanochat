@@ -5,6 +5,7 @@ We use the "smol" version, which is more appropriate for smaller models.
 """
 
 from datasets import load_dataset
+
 from tasks.common import Task
 
 

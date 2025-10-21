@@ -31,22 +31,23 @@ Abuse Prevention:
 """
 
 import argparse
-import json
-import os
-import torch
 import asyncio
+import json
 import logging
+import os
 import random
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse
-from pydantic import BaseModel
-from typing import List, Optional, AsyncGenerator
 from dataclasses import dataclass
 
-from nanochat.common import compute_init
+import torch
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from pydantic import BaseModel
+
 from nanochat.checkpoint_manager import load_model
+from nanochat.common import compute_init
 from nanochat.engine import Engine
 
 # Abuse prevention limits
@@ -119,13 +120,13 @@ class Worker:
 class WorkerPool:
     """Pool of workers, each with a model replica on a different GPU."""
 
-    def __init__(self, num_gpus: Optional[int] = None):
+    def __init__(self, num_gpus: int | None = None):
         self.num_gpus = num_gpus if num_gpus is not None else torch.cuda.device_count()
-        self.workers: List[Worker] = []
+        self.workers: list[Worker] = []
         self.available_workers: asyncio.Queue = asyncio.Queue()
 
     async def initialize(
-        self, source: str, model_tag: Optional[str] = None, step: Optional[int] = None
+        self, source: str, model_tag: str | None = None, step: int | None = None
     ):
         """Load model on each GPU."""
         print(f"Initializing worker pool with {self.num_gpus} GPUs...")
@@ -167,10 +168,10 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    messages: List[ChatMessage]
-    temperature: Optional[float] = None
-    max_tokens: Optional[int] = None
-    top_k: Optional[int] = None
+    messages: list[ChatMessage]
+    temperature: float | None = None
+    max_tokens: int | None = None
+    top_k: int | None = None
 
 
 def validate_chat_request(request: ChatRequest):
@@ -266,7 +267,7 @@ app.add_middleware(
 async def root():
     """Serve the chat UI."""
     ui_html_path = os.path.join("nanochat", "ui.html")
-    with open(ui_html_path, "r") as f:
+    with open(ui_html_path) as f:
         html_content = f.read()
     # Replace the API_URL to use the same origin
     html_content = html_content.replace(

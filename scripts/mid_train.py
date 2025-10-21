@@ -9,27 +9,26 @@ Or torchrun for training:
 torchrun --standalone --nproc_per_node=8 -m scripts.mid_train -- --device_batch_size=16
 """
 
-from collections import deque
 import os
+from collections import deque
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import time
-import wandb
+
 import torch
-
-from nanochat.common import (
-    compute_init,
-    compute_cleanup,
-    print0,
-    DummyWandb,
-    get_base_dir,
-)
-from nanochat.tokenizer import get_token_bytes
-from nanochat.checkpoint_manager import save_checkpoint
-from nanochat.loss_eval import evaluate_bpb
-from nanochat.checkpoint_manager import load_model
 import torch.distributed as dist
+import wandb
 
+from nanochat.checkpoint_manager import load_model, save_checkpoint
+from nanochat.common import (
+    DummyWandb,
+    compute_cleanup,
+    compute_init,
+    get_base_dir,
+    print0,
+)
+from nanochat.loss_eval import evaluate_bpb
+from nanochat.tokenizer import get_token_bytes
 from tasks.common import TaskMixture
 from tasks.gsm8k import GSM8K
 from tasks.mmlu import MMLU
@@ -54,7 +53,7 @@ dry_run = 0  # dry_run=1 is for experiments: we will log to wandb but we won't w
 config_keys = [
     k
     for k, v in globals().items()
-    if not k.startswith("_") and isinstance(v, (int, float, bool, str))
+    if not k.startswith("_") and isinstance(v, int | float | bool | str)
 ]
 exec(
     open(os.path.join("nanochat", "configurator.py")).read()
@@ -195,12 +194,7 @@ def mid_data_generator(split):
 
 
 train_loader = mid_data_generator("train")
-
-
-def build_val_loader():
-    return mid_data_generator("val")
-
-
+build_val_loader = lambda: mid_data_generator("val")
 progress = 0  # will go from 0 to 1 over the course of the epoch
 
 

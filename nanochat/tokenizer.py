@@ -6,17 +6,18 @@ Two implementations are available:
 2) Our own RustBPE Tokenizer for training and tiktoken for efficient inference
 """
 
-import os
 import copy
+import os
 import pickle
 from functools import lru_cache
 
-import rustbpe
 import tiktoken
+from tokenizers import Regex, decoders, pre_tokenizers
 from tokenizers import Tokenizer as HFTokenizer
-from tokenizers import decoders, pre_tokenizers, Regex
 from tokenizers.models import BPE
 from tokenizers.trainers import BpeTrainer
+
+import rustbpe
 
 SPECIAL_TOKENS = [
     # every document begins with the Beginning of Sequence (BOS) token that delimits documents
@@ -437,6 +438,7 @@ def get_tokenizer():
 
 def get_token_bytes(device="cpu"):
     import torch
+
     from nanochat.common import get_base_dir
 
     base_dir = get_base_dir()

@@ -8,14 +8,16 @@ torchrun --standalone --nproc_per_node=8 -m scripts.base_loss
 """
 
 import os
+
 import torch
+
 from nanochat.checkpoint_manager import load_model
-from nanochat.common import compute_init, print0, compute_cleanup
+from nanochat.common import compute_cleanup, compute_init, print0
 from nanochat.dataloader import tokenizing_distributed_data_loader
-from nanochat.tokenizer import get_token_bytes
-from nanochat.loss_eval import evaluate_bpb
 from nanochat.engine import Engine
+from nanochat.loss_eval import evaluate_bpb
 from nanochat.report import get_report
+from nanochat.tokenizer import get_token_bytes
 
 # Configuration
 device_batch_size = 32

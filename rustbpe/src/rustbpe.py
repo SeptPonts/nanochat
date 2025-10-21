@@ -16,22 +16,21 @@ Key goals:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, List, Tuple, Set, Iterable, Iterator, Optional
 import heapq
 import logging
+from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 
 # The third-party "regex" library is used to match Rust's FancyRegex features
 # (e.g., \p{L}, \p{N}, possessive quantifiers). pyproject.toml pins it.
 import regex as re
-
 
 # ------------------------ constants & type aliases ------------------------
 
 # Default GPT-4 style regex pattern for splitting text (identical to Rust)
 GPT4_PATTERN: str = r"'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"
 
-Pair = Tuple[int, int]
+Pair = tuple[int, int]
 
 
 # ------------------------ internal helpers ------------------------
@@ -44,15 +43,15 @@ class Word:
     We keep logic equivalent to the Rust version for clarity and learning.
     """
 
-    def __init__(self, ids: List[int]):
-        self.ids: List[int] = ids
+    def __init__(self, ids: list[int]):
+        self.ids: list[int] = ids
 
     def pairs(self) -> Iterator[Pair]:
         # Equivalent to Rust's `self.ids.windows(2)` iterator.
         for i in range(len(self.ids) - 1):
             yield (self.ids[i], self.ids[i + 1])
 
-    def merge_pair(self, pair: Pair, new_id: int) -> List[Tuple[Pair, int]]:
+    def merge_pair(self, pair: Pair, new_id: int) -> list[tuple[Pair, int]]:
         """Merge all non-overlapping occurrences of `pair` -> `new_id`.
 
         Returns a list of local pair-count deltas for THIS word only:
@@ -66,8 +65,8 @@ class Word:
         if n < 2:
             return []
 
-        out: List[int] = []
-        deltas: List[Tuple[Pair, int]] = []
+        out: list[int] = []
+        deltas: list[tuple[Pair, int]] = []
 
         i = 0
         while i < n:
@@ -111,9 +110,9 @@ class MergeJob:
 
     pair: Pair
     count: int
-    pos: Set[int]
+    pos: set[int]
 
-    def __lt__(self, other: "MergeJob") -> bool:  # heapq uses this
+    def __lt__(self, other: MergeJob) -> bool:  # heapq uses this
         if self.count != other.count:
             # Reverse: higher count considered "smaller" for min-heap
             return self.count > other.count
@@ -122,16 +121,16 @@ class MergeJob:
 
 
 def count_pairs_sequential(
-    words: List[Word], counts: List[int]
-) -> Tuple[Dict[Pair, int], Dict[Pair, Set[int]]]:
+    words: list[Word], counts: list[int]
+) -> tuple[dict[Pair, int], dict[Pair, set[int]]]:
     """Compute initial pair counts and the word indices where pairs occur.
 
     NOTE: Unlike Rust (which uses rayon for parallelism), this Python version
     computes counts sequentially for simplicity and determinism. The logic and
     the outputs are equivalent; only the lack of parallelism differs.
     """
-    pair_counts: Dict[Pair, int] = {}
-    where_to_update: Dict[Pair, Set[int]] = {}
+    pair_counts: dict[Pair, int] = {}
+    where_to_update: dict[Pair, set[int]] = {}
 
     for i, (w, c) in enumerate(zip(words, counts)):
         if c == 0 or len(w.ids) < 2:
@@ -170,18 +169,18 @@ class Tokenizer:
 
     def __init__(self) -> None:
         # Maps pairs of token IDs to their merged token ID (Rust: StdHashMap<Pair, u32>)
-        self.merges: Dict[Pair, int] = {}
+        self.merges: dict[Pair, int] = {}
 
         # Regex pattern used for text splitting (string form)
         self.pattern: str = ""
 
         # Compiled regex for efficiency (Rust caches a compiled FancyRegex)
         # Python: use the third-party 'regex' module to support \p{...} etc.
-        self.compiled_pattern: Optional[re.Pattern] = None
+        self.compiled_pattern: re.Pattern | None = None
 
     # ---------------- internal core training (mirrors Rust) ----------------
     def train_core_incremental(
-        self, words: List[Word], counts: List[int], vocab_size: int
+        self, words: list[Word], counts: list[int], vocab_size: int
     ) -> None:
         """Core incremental BPE training given unique words and their counts.
 
@@ -205,7 +204,7 @@ class Tokenizer:
         # Rust uses OctonaryHeap; we use Python's heapq with a custom comparator
         # in MergeJob. Behavior is equivalent: max-heap by count, tie-break by pair.
         logging.info("Building heap with %d unique pairs", len(pair_counts))
-        heap: List[MergeJob] = []
+        heap: list[MergeJob] = []
         for pair, pos in where_to_update.items():
             c = pair_counts.get(pair, 0)
             if c > 0:
@@ -237,7 +236,7 @@ class Tokenizer:
             self.merges[top.pair] = new_id
 
             # Merge this pair in all words where it occurs
-            local_pos_updates: Dict[Pair, Set[int]] = {}
+            local_pos_updates: dict[Pair, set[int]] = {}
             for word_idx in top.pos:
                 changes = words[word_idx].merge_pair(top.pair, new_id)
                 # Update global pair counts based on this word's count
@@ -284,7 +283,7 @@ class Tokenizer:
         iterator: Iterable[str],
         vocab_size: int,
         buffer_size: int = 8192,
-        pattern: Optional[str] = None,
+        pattern: str | None = None,
     ) -> None:
         """Train BPE tokenizer from a streaming iterator of strings.
 
@@ -304,10 +303,10 @@ class Tokenizer:
             raise ValueError(f"Invalid regex pattern: {e}") from e
 
         # Global chunk counts
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
 
         # Temporary buffer filled from the input iterator
-        buf: List[str] = []
+        buf: list[str] = []
         it = iter(iterator)
 
         logging.info(
@@ -340,7 +339,7 @@ class Tokenizer:
             # Python: run sequentially but keep logic identical.
             pattern_obj = self.compiled_pattern
             assert pattern_obj is not None
-            local: Dict[str, int] = {}
+            local: dict[str, int] = {}
             for s in buf:
                 for m in pattern_obj.finditer(s):
                     piece = m.group(0)
@@ -358,8 +357,8 @@ class Tokenizer:
         )
 
         # Materialize words & counts (byte-level like Rust)
-        words: List[Word] = []
-        cvec: List[int] = []
+        words: list[Word] = []
+        cvec: list[int] = []
         # For determinism, iterate in the insertion order of `counts`, which is
         # deterministic in Python 3.7+. Rust iterates over a HashMap then collects;
         # order does not affect correctness since we store (word, count) aligned.
@@ -373,7 +372,7 @@ class Tokenizer:
         """Return the regex pattern string used for splitting text."""
         return self.pattern
 
-    def get_mergeable_ranks(self) -> List[Tuple[bytes, int]]:
+    def get_mergeable_ranks(self) -> list[tuple[bytes, int]]:
         """Return the mergeable ranks: token bytes -> token id (rank).
 
         The build process mirrors the Rust version: we construct token byte
@@ -381,10 +380,10 @@ class Tokenizer:
         assigned token ID (ascending). This allows reconstructing the merged
         byte sequences progressively.
         """
-        mergeable_ranks: List[Tuple[bytes, int]] = []
+        mergeable_ranks: list[tuple[bytes, int]] = []
 
         # Build vocabulary incrementally from low to high token IDs
-        token_bytes: List[bytes] = [bytes([i]) for i in range(256)]
+        token_bytes: list[bytes] = [bytes([i]) for i in range(256)]
 
         for i, b in enumerate(token_bytes):
             mergeable_ranks.append((b, i))
@@ -405,7 +404,7 @@ class Tokenizer:
 
         return mergeable_ranks
 
-    def encode(self, text: str) -> List[int]:
+    def encode(self, text: str) -> list[int]:
         """Encode a string into token IDs by applying learned merges.
 
         This is a byte-level BPE encoding:
@@ -417,16 +416,16 @@ class Tokenizer:
         assert self.compiled_pattern is not None, (
             "Tokenizer not trained: call train_from_iterator first"
         )
-        all_ids: List[int] = []
+        all_ids: list[int] = []
 
         for m in self.compiled_pattern.finditer(text):
             chunk = m.group(0)
-            ids: List[int] = list(chunk.encode("utf-8"))
+            ids: list[int] = list(chunk.encode("utf-8"))
 
             # Apply merges iteratively
             while len(ids) >= 2:
-                best_idx: Optional[int] = None
-                best_new_id: Optional[int] = None
+                best_idx: int | None = None
+                best_new_id: int | None = None
 
                 # Find the best pair to merge: choose the pair with the smallest merged token id
                 for i in range(len(ids) - 1):

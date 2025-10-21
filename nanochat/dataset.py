@@ -7,12 +7,13 @@ This file contains utilities for:
 For details of how the dataset was prepared, see `repackage_data_reference.py`.
 """
 
-import os
 import argparse
+import os
 import time
-import requests
-import pyarrow.parquet as pq
 from multiprocessing import Pool
+
+import pyarrow.parquet as pq
+import requests
 
 from nanochat.common import get_base_dir
 
@@ -24,13 +25,7 @@ BASE_URL = (
     "https://huggingface.co/datasets/karpathy/fineweb-edu-100b-shuffle/resolve/main"
 )
 MAX_SHARD = 1822  # the last datashard is shard_01822.parquet
-
-
-def index_to_filename(index):
-    """Format of the filenames"""
-    return f"shard_{index:05d}.parquet"
-
-
+index_to_filename = lambda index: f"shard_{index:05d}.parquet"
 base_dir = get_base_dir()
 DATA_DIR = os.path.join(base_dir, "base_data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -104,7 +99,7 @@ def download_single_file(index):
             print(f"Successfully downloaded {filename}")
             return True
 
-        except (requests.RequestException, IOError) as e:
+        except (OSError, requests.RequestException) as e:
             print(f"Attempt {attempt}/{max_attempts} failed for {filename}: {e}")
             # Clean up any partial files
             for path in [filepath + ".tmp", filepath]:

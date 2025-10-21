@@ -55,3 +55,25 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+# Recommended rule set
+select = [
+    "E",   # pycodestyle errors
+    "F",   # Pyflakes
+    "I",   # isort - import sorting
+    "UP",  # pyupgrade - code modernization
+]
+
+# Reasonable ignores
+ignore = [
+    "E501",  # Line length handled by formatter
+    "E731",  # Allow lambda assignment for simple one-liners
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["nanochat", "tasks", "scripts"]

@@ -11,14 +11,16 @@ Notes:
 The whole thing is made as efficient as possible.
 """
 
-import torch
-import torch.nn.functional as F
 import signal
 import warnings
-from contextlib import contextmanager
 from collections import deque
-from nanochat.common import compute_init
+from contextlib import contextmanager
+
+import torch
+import torch.nn.functional as F
+
 from nanochat.checkpoint_manager import load_model
+from nanochat.common import compute_init
 
 
 # -----------------------------------------------------------------------------
@@ -193,9 +195,7 @@ class Engine:
         rng.manual_seed(seed)
 
         # Get the special tokens we need to coordinate the tool use state machine
-        def get_special(s):
-            return self.tokenizer.encode_special(s)
-
+        get_special = lambda s: self.tokenizer.encode_special(s)
         python_start = get_special("<|python_start|>")
         python_end = get_special("<|python_end|>")
         output_start = get_special("<|output_start|>")

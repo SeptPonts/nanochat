@@ -2,13 +2,14 @@
 Utilities for generating training report cards. More messy code than usual, will fix.
 """
 
+import datetime
 import os
+import platform
 import re
 import shutil
-import subprocess
 import socket
-import datetime
-import platform
+import subprocess
+
 import psutil
 import torch
 
@@ -175,7 +176,7 @@ Generated: {timestamp}
     # count dependencies via uv.lock
     uv_lock_lines = 0
     if os.path.exists("uv.lock"):
-        with open("uv.lock", "r") as f:
+        with open("uv.lock") as f:
             uv_lock_lines = len(f.readlines())
 
     header += f"""
@@ -289,7 +290,7 @@ class Report:
             # write the header first
             header_file = os.path.join(report_dir, "header.md")
             if os.path.exists(header_file):
-                with open(header_file, "r") as f:
+                with open(header_file) as f:
                     header_content = f.read()
                     out_file.write(header_content)
                     start_time = extract_timestamp(header_content, "Run started:")
@@ -304,7 +305,7 @@ class Report:
                 if not os.path.exists(section_file):
                     print(f"Warning: {section_file} does not exist, skipping")
                     continue
-                with open(section_file, "r") as in_file:
+                with open(section_file) as in_file:
                     section = in_file.read()
                 # Extract timestamp from this section (the last section's timestamp will "stick" as end_time)
                 if "rl" not in file_name:

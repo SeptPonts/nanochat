@@ -12,24 +12,25 @@ import os
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import time
-import wandb
-import torch
 
-from nanochat.gpt import GPT, GPTConfig
-from nanochat.dataloader import tokenizing_distributed_data_loader
-from nanochat.common import (
-    compute_init,
-    compute_cleanup,
-    print0,
-    DummyWandb,
-    print_banner,
-    get_base_dir,
-)
-from nanochat.tokenizer import get_tokenizer, get_token_bytes
+import torch
+import wandb
+
 from nanochat.checkpoint_manager import save_checkpoint
+from nanochat.common import (
+    DummyWandb,
+    compute_cleanup,
+    compute_init,
+    get_base_dir,
+    print0,
+    print_banner,
+)
+from nanochat.dataloader import tokenizing_distributed_data_loader
+from nanochat.engine import Engine
+from nanochat.gpt import GPT, GPTConfig
 from nanochat.loss_eval import evaluate_bpb
 from nanochat.report import get_report
-from nanochat.engine import Engine
+from nanochat.tokenizer import get_token_bytes, get_tokenizer
 from scripts.base_eval import evaluate_model
 
 print_banner()
@@ -68,7 +69,7 @@ model_tag = (
 config_keys = [
     k
     for k, v in globals().items()
-    if not k.startswith("_") and isinstance(v, (int, float, bool, str))
+    if not k.startswith("_") and isinstance(v, int | float | bool | str)
 ]
 exec(
     open(os.path.join("nanochat", "configurator.py")).read()
@@ -188,14 +189,9 @@ tokens_dir = os.path.join(base_dir, "tokenized_data")
 train_loader = tokenizing_distributed_data_loader(
     device_batch_size, max_seq_len, split="train"
 )
-
-
-def build_val_loader():
-    return tokenizing_distributed_data_loader(
-        device_batch_size, max_seq_len, split="val"
-    )
-
-
+build_val_loader = lambda: tokenizing_distributed_data_loader(
+    device_batch_size, max_seq_len, split="val"
+)
 x, y = next(train_loader)  # kick off load of the very first batch of data
 
 # -----------------------------------------------------------------------------

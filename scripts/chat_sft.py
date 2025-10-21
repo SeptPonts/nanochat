@@ -13,25 +13,23 @@ import os
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-import wandb
 import torch
 import torch.distributed as dist
+import wandb
 
+from nanochat.checkpoint_manager import load_model, save_checkpoint
 from nanochat.common import (
-    compute_init,
+    DummyWandb,
     compute_cleanup,
+    compute_init,
     get_base_dir,
     print0,
-    DummyWandb,
 )
-from nanochat.checkpoint_manager import load_model
-from nanochat.checkpoint_manager import save_checkpoint
 from nanochat.engine import Engine
 from nanochat.report import get_report
 from scripts.chat_eval import run_chat_eval
-
-from tasks.common import TaskMixture
 from tasks.arc import ARC
+from tasks.common import TaskMixture
 from tasks.gsm8k import GSM8K
 from tasks.smoltalk import SmolTalk
 
@@ -64,7 +62,7 @@ eval_metrics_every = 200
 config_keys = [
     k
     for k, v in globals().items()
-    if not k.startswith("_") and isinstance(v, (int, float, bool, str))
+    if not k.startswith("_") and isinstance(v, int | float | bool | str)
 ]
 exec(
     open(os.path.join("nanochat", "configurator.py")).read()
@@ -171,11 +169,7 @@ if max_iterations >= 0 and num_iterations > max_iterations:
     )
     num_iterations = max_iterations
 train_loader = sft_data_generator(train_ds, batch_size=device_batch_size)
-
-
-def build_val_loader():
-    return sft_data_generator(val_ds, batch_size=device_batch_size)
-
+build_val_loader = lambda: sft_data_generator(val_ds, batch_size=device_batch_size)
 
 # -----------------------------------------------------------------------------
 # Initialize the Optimizer

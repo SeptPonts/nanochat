@@ -14,14 +14,13 @@ from functools import partial
 import torch
 import torch.distributed as dist
 
-from nanochat.common import compute_init, compute_cleanup, get_dist_info, print0
 from nanochat.checkpoint_manager import load_model
+from nanochat.common import compute_cleanup, compute_init, get_dist_info, print0
 from nanochat.engine import Engine
-
-from tasks.humaneval import HumanEval
-from tasks.mmlu import MMLU
 from tasks.arc import ARC
 from tasks.gsm8k import GSM8K
+from tasks.humaneval import HumanEval
+from tasks.mmlu import MMLU
 
 # -----------------------------------------------------------------------------
 # Generative evaluation loop (we go one problem at a time, sample, evaluate)
@@ -122,10 +121,7 @@ def run_categorical_eval(task_object, tokenizer, model, batch_size, max_problems
         if max_problems is None
         else min(len(task_object), max_problems)
     )
-
-    def ceil_div(x, y):
-        return -(-x // y)
-
+    ceil_div = lambda x, y: -(-x // y)
     num_batches = ceil_div(num_problems, batch_size)
 
     # Run the evaluation

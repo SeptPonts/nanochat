@@ -2,17 +2,17 @@
 Utilities for saving and loading model/optim/state checkpoints.
 """
 
-import os
-import re
 import glob
 import json
 import logging
+import os
+import re
+
 import torch
 
-from nanochat.common import get_base_dir
+from nanochat.common import get_base_dir, setup_default_logging
 from nanochat.gpt import GPT, GPTConfig
 from nanochat.tokenizer import get_tokenizer
-from nanochat.common import setup_default_logging
 
 # Set up logging
 setup_default_logging()
@@ -54,7 +54,7 @@ def load_checkpoint(checkpoint_dir, step, device, load_optimizer=False):
         optimizer_data = torch.load(optimizer_path, map_location=device)
     # Load the metadata
     meta_path = os.path.join(checkpoint_dir, f"meta_{step:06d}.json")
-    with open(meta_path, "r") as f:
+    with open(meta_path) as f:
         meta_data = json.load(f)
     return model_data, optimizer_data, meta_data
 

@@ -18,16 +18,18 @@ python -m pytest tests/test_rustbpe.py -v -s
 -v is verbose, -s is show prints
 """
 
-import regex as re
-from collections import Counter, defaultdict
 import time
-import rustbpe
+from collections import Counter, defaultdict
+
+import pytest
+import regex as re
 import tiktoken
+from tokenizers import Regex, decoders, pre_tokenizers
 from tokenizers import Tokenizer as HFTokenizer
-from tokenizers import decoders, pre_tokenizers, Regex
 from tokenizers.models import BPE
 from tokenizers.trainers import BpeTrainer
-import pytest
+
+import rustbpe
 
 GPT4_SPLIT_PATTERN = r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
 
@@ -453,6 +455,7 @@ def enwik8_path():
     """Fixture to download and cache enwik8 dataset."""
     import os
     import zipfile
+
     from nanochat.common import get_base_dir
 
     base_dir = get_base_dir()
@@ -480,14 +483,14 @@ def enwik8_path():
 @pytest.fixture(scope="module")
 def enwik8_small(enwik8_path):
     """Fixture providing 100KB of enwik8 for quick tests."""
-    with open(enwik8_path, "r") as f:
+    with open(enwik8_path) as f:
         return f.read(100_000)
 
 
 @pytest.fixture(scope="module")
 def enwik8_large(enwik8_path):
     """Fixture providing 10MB of enwik8 for performance tests."""
-    with open(enwik8_path, "r") as f:
+    with open(enwik8_path) as f:
         return f.read(10**7)
 
 
@@ -652,6 +655,7 @@ def test_training_performance(enwik8_large):
 def test_interface(enwik8_small):
     """Test the RustBPETokenizer interface for training, encoding, decoding, and serialization."""
     import tempfile
+
     from nanochat.tokenizer import RustBPETokenizer
 
     # Simple train test
