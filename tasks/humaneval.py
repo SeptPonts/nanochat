@@ -17,7 +17,7 @@ def extract_imports(prompt):
     imports = []
     for line in prompt.split("\n"):
         stripped = line.strip()
-        if stripped.startswith("import ") or stripped.startswith("from "):
+        if stripped.startswith(("import ", "from ")):
             imports.append(stripped)
         elif stripped and not stripped.startswith("#"):
             # Stop at first non-import, non-comment line

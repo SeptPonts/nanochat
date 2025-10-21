@@ -5,6 +5,7 @@ Common utilities for nanochat.
 import logging
 import os
 import re
+from typing import ClassVar
 
 import torch
 import torch.distributed as dist
@@ -14,7 +15,7 @@ class ColoredFormatter(logging.Formatter):
     """Custom formatter that adds colors to log messages."""
 
     # ANSI color codes
-    COLORS = {
+    COLORS: ClassVar[dict[str, str]] = {
         "DEBUG": "\033[36m",  # Cyan
         "INFO": "\033[32m",  # Green
         "WARNING": "\033[33m",  # Yellow

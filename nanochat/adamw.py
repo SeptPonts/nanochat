@@ -22,7 +22,7 @@ class DistAdamW(torch.optim.Optimizer):
         eps: float = 1e-8,
         weight_decay: float = 0.01,
     ):
-        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
+        defaults = {"lr": lr, "betas": betas, "eps": eps, "weight_decay": weight_decay}
         super().__init__(param_groups, defaults)
 
     @torch.compile

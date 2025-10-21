@@ -129,14 +129,14 @@ print0(
 )
 # -----------------------------------------------------------------------------
 # Initialize the Model
-model_config_kwargs = dict(
-    sequence_len=max_seq_len,
-    vocab_size=vocab_size,
-    n_layer=num_layers,
-    n_head=num_heads,
-    n_kv_head=num_kv_heads,
-    n_embd=model_dim,
-)
+model_config_kwargs = {
+    "sequence_len": max_seq_len,
+    "vocab_size": vocab_size,
+    "n_layer": num_layers,
+    "n_head": num_heads,
+    "n_kv_head": num_kv_heads,
+    "n_embd": model_dim,
+}
 with torch.device("meta"):
     model_config = GPTConfig(**model_config_kwargs)
     model = GPT(model_config)
@@ -325,7 +325,7 @@ for step in range(num_iterations + 1):
     # evaluate the gradient
     torch.cuda.synchronize()
     t0 = time.time()
-    for micro_step in range(grad_accum_steps):
+    for _micro_step in range(grad_accum_steps):
         with autocast_ctx:
             loss = model(x, y)
         train_loss = loss.detach()  # for logging

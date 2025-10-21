@@ -136,7 +136,7 @@ def main():
     assert len(sys.argv) in [1, 2], "Usage: python base_eval.py [hf_path]"
 
     # distributed / precision setup
-    ddp, ddp_rank, ddp_local_rank, ddp_world_size, device = compute_init()
+    _ddp, ddp_rank, _ddp_local_rank, _ddp_world_size, device = compute_init()
     autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
 
     # Load model and tokenizer from command line or from file system

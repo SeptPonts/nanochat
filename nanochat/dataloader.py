@@ -12,7 +12,7 @@ def tokenizing_distributed_data_loader(
 ):
     """Stream pretraining text from parquet files, tokenize, yield training batches."""
     assert split in ["train", "val"], "split must be 'train' or 'val'"
-    ddp, ddp_rank, ddp_local_rank, ddp_world_size = get_dist_info()
+    _ddp, ddp_rank, _ddp_local_rank, ddp_world_size = get_dist_info()
     needed_tokens = B * T + 1  # +1 is because we also need the target at the last token
     # get the tokenizer and the bos token
     tokenizer = get_tokenizer()

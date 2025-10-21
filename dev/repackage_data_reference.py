@@ -63,7 +63,7 @@ for doc in ds:
             shard_path,
             row_group_size=row_group_size,
             use_dictionary=False,  # this is usually used for categorical data
-            compression="zstd",  # Valid values: {‘NONE’, ‘SNAPPY’, ‘GZIP’, ‘BROTLI’, ‘LZ4’, ‘ZSTD’}
+            compression="zstd",  # Valid values: {'NONE', 'SNAPPY', 'GZIP', 'BROTLI', 'LZ4', 'ZSTD'}
             compression_level=3,
             write_statistics=False,  # not needed for text
         )

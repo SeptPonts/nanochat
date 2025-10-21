@@ -203,7 +203,7 @@ def run_gsm8k_eval(
         assert (
             num_samples <= device_batch_size
         )  # usually this is true. we can add a loop if not...
-        generated_token_sequences, masks = engine.generate_batch(
+        generated_token_sequences, _masks = engine.generate_batch(
             tokens,
             num_samples=num_samples,
             max_tokens=max_completion_tokens,

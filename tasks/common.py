@@ -134,7 +134,10 @@ def render_mc(question, letters, choices):
     """
     query = f"Multiple Choice question: {question}\n"
     query += "".join(
-        [f"- {choice}={letter}\n" for letter, choice in zip(letters, choices)]
+        [
+            f"- {choice}={letter}\n"
+            for letter, choice in zip(letters, choices, strict=True)
+        ]
     )
     query += "\nRespond only with the letter of the correct answer."
     return query

@@ -20,6 +20,7 @@ python -m pytest tests/test_rustbpe.py -v -s
 
 import time
 from collections import Counter, defaultdict
+from itertools import pairwise
 
 import pytest
 import regex as re
@@ -44,7 +45,7 @@ def get_stats(ids, counts=None):
     Optionally allows to update an existing dictionary of counts
     """
     counts = {} if counts is None else counts
-    for pair in zip(ids, ids[1:]):  # iterate consecutive elements
+    for pair in pairwise(ids):  # iterate consecutive elements
         counts[pair] = counts.get(pair, 0) + 1
     return counts
 
@@ -251,8 +252,10 @@ class FastRegexTokenizer:
             set
         )  # pair -> set of chunk indices that contain this pair
 
-        for chunk_idx, (chunk_ids, count) in enumerate(zip(ids, chunk_counts)):
-            for pair in zip(chunk_ids, chunk_ids[1:]):
+        for chunk_idx, (chunk_ids, count) in enumerate(
+            zip(ids, chunk_counts, strict=True)
+        ):
+            for pair in pairwise(chunk_ids):
                 stats[pair] += count
                 positions[pair].add(chunk_idx)
 
@@ -564,7 +567,7 @@ def test_correctness(enwik8_small):
     # HuggingFace has a different byte order, so we need custom matching
     def custom_match(ids1, ids2):
         perm = {}
-        for x, y in zip(ids1, ids2):
+        for x, y in zip(ids1, ids2, strict=True):
             if x < 256:
                 if x in perm:
                     if perm[x] != y:
@@ -639,7 +642,7 @@ def test_training_performance(enwik8_large):
 
     # Train HuggingFace
     print("\nTraining HuggingFace...")
-    hf_tokenizer, hf_train_time = time_function(
+    _hf_tokenizer, hf_train_time = time_function(
         HuggingFaceTokenizer.train_from_iterator, [text], vocab_size
     )
     print(f"HuggingFace train time: {hf_train_time:.4f}s")
@@ -688,7 +691,7 @@ def test_interface(enwik8_small):
     # append/prepend functionality
     ids_special = tok.encode(encode_text, prepend="<|bos|>", append="<|bos|>")
     bos_token_id = tok.encode_special("<|bos|>")
-    assert ids_special == [bos_token_id] + ids + [bos_token_id], (
+    assert ids_special == [bos_token_id, *ids, bos_token_id], (
         "Special tokens not correctly added"
     )
     print("✅ append/prepend OK")

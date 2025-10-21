@@ -51,9 +51,7 @@ def eval_with_timeout(formula, max_time=3):
 def use_calculator(expr):
     """Evaluate a math expression safely."""
     expr = expr.replace(",", "")
-    if any(
-        [x not in "0123456789*+-/.() " for x in expr]
-    ):  # for now disallow non-numeric chars
+    if any(x not in "0123456789*+-/.() " for x in expr):  # disallow non-numeric chars
         return None
     if "**" in expr:  # for now disallow power operator, could be very expensive
         return None
@@ -88,7 +86,9 @@ class KVCache:
         # 1) validate the shapes
         assert self.kv_cache is None, "Cannot prefill a non-empty KV cache"
         assert other.kv_cache is not None, "Cannot prefill with a None KV cache"
-        for ix, (dim1, dim2) in enumerate(zip(self.kv_shape, other.kv_shape)):
+        for ix, (dim1, dim2) in enumerate(
+            zip(self.kv_shape, other.kv_shape, strict=True)
+        ):
             if ix in [0, 1, 3, 5]:
                 # num_layers, batch_size, num_heads, head_dim must match
                 assert dim1 == dim2, f"Batch dim mismatch: {dim1} != {dim2}"
@@ -113,7 +113,7 @@ class KVCache:
         if self.kv_cache is None:
             self.kv_cache = torch.empty(self.kv_shape, dtype=k.dtype, device=k.device)
         # Insert new keys/values to the cache and return the full cache so far
-        B, H, T_add, D = k.size()
+        _B, _H, T_add, _D = k.size()
         t0, t1 = self.pos, self.pos + T_add
         # Dynamically grow the cache if needed
         if t1 > self.kv_cache.size(4):
@@ -323,8 +323,10 @@ class Engine:
         results = [tokens.copy() for _ in range(num_samples)]
         masks = [[0] * len(tokens) for _ in range(num_samples)]
         completed = [False] * num_samples
-        for token_column, token_masks in self.generate(tokens, num_samples, **kwargs):
-            for i, (token, mask) in enumerate(zip(token_column, token_masks)):
+        for token_column, _token_masks in self.generate(tokens, num_samples, **kwargs):
+            for i, (token, mask) in enumerate(
+                zip(token_column, _token_masks, strict=True)
+            ):
                 if not completed[i]:
                     if token == assistant_end or token == bos:
                         completed[i] = True
@@ -350,7 +352,7 @@ if __name__ == "__main__":
     model, tokenizer, meta = load_model("base", device, phase="eval")
     bos_token_id = tokenizer.get_bos_token_id()
     # common hyperparameters
-    kwargs = dict(max_tokens=64, temperature=0.0)
+    kwargs = {"max_tokens": 64, "temperature": 0.0}
     # set the starting prompt
     prompt_tokens = tokenizer.encode(
         "The chemical formula of water is", prepend=bos_token_id
@@ -377,7 +379,7 @@ if __name__ == "__main__":
     )  # note: runs in fp32
     torch.cuda.synchronize()
     t0 = time.time()
-    for token_column, token_masks in stream:
+    for token_column, _token_masks in stream:
         token = token_column[0]  # only print out the first row
         generated_tokens.append(token)
         chunk = tokenizer.decode([token])

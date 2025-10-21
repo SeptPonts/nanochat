@@ -132,7 +132,7 @@ def count_pairs_sequential(
     pair_counts: dict[Pair, int] = {}
     where_to_update: dict[Pair, set[int]] = {}
 
-    for i, (w, c) in enumerate(zip(words, counts)):
+    for i, (w, c) in enumerate(zip(words, counts, strict=True)):
         if c == 0 or len(w.ids) < 2:
             continue
         for pair in w.pairs():

@@ -203,7 +203,7 @@ def evaluate_example(idx, model, tokenizer, data, device, task_meta):
     if hasattr(model, "max_seq_len") and model.max_seq_len is not None:
         max_tokens = model.max_seq_len
         new_tokens, new_start_idxs, new_end_idxs = [], [], []
-        for t, s, e in zip(tokens, start_idxs, end_idxs):
+        for t, s, e in zip(tokens, start_idxs, end_idxs, strict=True):
             if len(t) > max_tokens:
                 num_to_crop = len(t) - max_tokens
                 new_tokens.append(t[-max_tokens:])  # take the last max_tokens tokens
@@ -238,7 +238,7 @@ def evaluate_example(idx, model, tokenizer, data, device, task_meta):
         # For MC/schema: find the option with lowest average loss
         mean_losses = [
             losses[i, si - 1 : ei - 1].mean().item()
-            for i, (si, ei) in enumerate(zip(start_idxs, end_idxs))
+            for i, (si, ei) in enumerate(zip(start_idxs, end_idxs, strict=True))
         ]
         pred_idx = mean_losses.index(min(mean_losses))
         is_correct = pred_idx == item["gold"]

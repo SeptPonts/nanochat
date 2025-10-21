@@ -9,7 +9,6 @@ Two implementations are available:
 import copy
 import os
 import pickle
-from functools import lru_cache
 
 import tiktoken
 from tokenizers import Regex, decoders, pre_tokenizers
@@ -174,6 +173,7 @@ class RustBPETokenizer:
 
     def __init__(self, enc, bos_token):
         self.enc = enc
+        self._special_cache: dict[str, int] = {}
         self.bos_token_id = self.encode_special(bos_token)
 
     @classmethod
@@ -230,9 +230,13 @@ class RustBPETokenizer:
     def id_to_token(self, id):
         return self.enc.decode([id])
 
-    @lru_cache(maxsize=32)
     def encode_special(self, text):
-        return self.enc.encode_single_token(text)
+        cached = self._special_cache.get(text)
+        if cached is not None:
+            return cached
+        token_id = self.enc.encode_single_token(text)
+        self._special_cache[text] = token_id
+        return token_id
 
     def get_bos_token_id(self):
         return self.bos_token_id
@@ -394,7 +398,7 @@ class RustBPETokenizer:
         GREEN = "\033[92m"
         RESET = "\033[0m"
         tokens = []
-        for i, (token_id, mask_val) in enumerate(zip(ids, mask)):
+        for _i, (token_id, mask_val) in enumerate(zip(ids, mask, strict=True)):
             token_str = self.decode([token_id])
             color = GREEN if mask_val == 1 else RED
             tokens.append(f"{color}{token_str}{RESET}")
@@ -415,7 +419,7 @@ class RustBPETokenizer:
         messages.pop()  # remove the last message (of the Assistant) inplace
 
         # Now tokenize the conversation
-        ids, mask = self.render_conversation(conversation)
+        ids, _mask = self.render_conversation(conversation)
 
         # Finally, to prime the Assistant for a completion, append the Assistant start token
         assistant_start = self.encode_special("<|assistant_start|>")

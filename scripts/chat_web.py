@@ -301,7 +301,7 @@ async def generate_stream(
     last_clean_text = ""
 
     with worker.autocast_ctx:
-        for token_column, token_masks in worker.engine.generate(
+        for token_column, _token_masks in worker.engine.generate(
             tokens,
             num_samples=1,
             max_tokens=max_new_tokens,
@@ -341,7 +341,7 @@ async def chat_completions(request: ChatRequest):
 
     # Log incoming conversation to console
     logger.info("=" * 20)
-    for i, message in enumerate(request.messages):
+    for _i, message in enumerate(request.messages):
         logger.info(f"[{message.role.upper()}]: {message.content}")
     logger.info("-" * 20)
 

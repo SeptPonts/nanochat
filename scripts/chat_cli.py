@@ -106,7 +106,7 @@ while True:
     response_tokens = []
     print("\nAssistant: ", end="", flush=True)
     with autocast_ctx:
-        for token_column, token_masks in engine.generate(
+        for token_column, _token_masks in engine.generate(
             conversation_tokens, **generate_kwargs
         ):
             token = token_column[0]  # pop the batch dimension (num_samples=1)
