@@ -22,10 +22,10 @@ dependencies = [
 requires = ["maturin>=1.7,<2.0"]
 build-backend = "maturin"
 
-# target torch to cuda 12.8
+# target torch to cuda 12.8 on Linux, use standard PyPI on macOS
 [tool.uv.sources]
 torch = [
-    { index = "pytorch-cu128" },
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
 ]
 
 [[tool.uv.index]]
@@ -42,7 +42,9 @@ manifest-path = "rustbpe/Cargo.toml"
 [dependency-groups]
 dev = [
     "maturin>=1.9.4",
+    "pre-commit>=4.0.0",
     "pytest>=8.0.0",
+    "ruff>=0.11.0",
 ]
 
 [tool.pytest.ini_options]
