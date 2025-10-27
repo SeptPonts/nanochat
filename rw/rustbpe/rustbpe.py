@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+import logging
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
+
+import regex as re
 
 # ------------------------ constants & type aliases ------------------------
 
@@ -184,3 +187,169 @@ def count_pairs_sequential(
             s.add(i)
 
     return pair_counts, where_to_update
+
+
+class Tokenizer:
+    """
+    BPE (Byte Pair Encoding) tokenizer
+    """
+
+    def __init__(self) -> None:
+        # Maps paris of token IDs to their merged token ID
+        self.merges: dict[Pair, int] = {}
+        # Regex pattern used for text splitting (string form)
+        self.pattern: str = ""
+        # Compilied version
+        self.compiled_pattern: re.Pattern | None = None
+
+    def train_core_incremental(
+        self, words: list[Word], counts: list[int], vocab_size: int
+    ) -> None:
+        """
+        Core incremental BPE training logic
+        给定列表 [(word1, count1), ..., (wordk, countk)]
+        """
+
+    def train_from_iterator(
+        self,
+        iterator: Iterable[str],
+        vocab_size: int,
+        buffer_size: int = 8192,
+        pattern: str | None = None,
+    ) -> None:
+        """
+        Trarin BPE tokenizeer from a streaming iterator of strings.
+        """
+        pattern_str = pattern if pattern is not None else GPT4_PATTERN
+        self.pattern = pattern_str
+
+        try:
+            self.compiled_pattern = re.compile(pattern_str)
+        except re.error as e:
+            raise ValueError(f"Invalid regex pattern: {e}") from e
+
+        # Global chunk counts
+        counts: dict[str, int] = {}
+
+        # Temporary buffer filled from the input iterator
+        buf: list[str] = []
+        it = iter(iterator)
+
+        logging.info(
+            "Processing sequences from iterator (buffer_size: %d)", buffer_size
+        )
+        total_sequences = 0
+
+        def refill() -> bool:
+            """
+            Refill `buf` from `it` up to `buffer_size`
+
+            Returns True if the iterator is exhausted; False otherwise
+            """
+            buf.clear()
+            while len(buf) < buffer_size:
+                try:
+                    buf.append(next(it))
+                except StopIteration:
+                    return True
+            return False
+
+        # Stream ingestion loop: refill buffer, then process sequentially
+        while True:
+            exhasuted = refill()
+            if not buf and exhasuted:
+                break
+
+            total_sequences += len(buf)
+
+            # Rust 版本中通过 release GIL 实现了并行，这里实现串行版本
+
+    def get_pattern(self) -> str:
+        """
+        Return 分割文本用的 regex pattern
+        """
+        return self.patterns
+
+    def get_mergeable_ranks() -> list[tuple[bytes, int]]:
+        """
+        Return mergable ranks: token bytes -> token id (rank)
+        """
+
+    def encode(self, text: str) -> list[int]:
+        """
+        将 string encode 为一连串的 token IDs
+
+        byte-level BPE encoding:
+        1. 使用 compiled regex pattern 分割 text
+        2. 将每个 chunk 转换为 UTF-8 bytes -> list of ints
+        3. 重复合并最低 new_id 的 pair 直到没有可合并的 pair
+        4. 将所有 resulting ids 跨 chunk 拼接在一起
+        """
+        assert self.compiled_pattern is not None, {
+            "Tokenizer not trained: call train_from_iterator first"
+        }
+        all_ids: list[int] = []
+
+        # 正则匹配将给定 text 分割成一系列的 chunk
+        """
+        第 1 次循环
+
+        # finditer 找到第一个匹配
+        m = <Match object>
+        m.span() = (0, 1)  # 匹配位置：从索引 0 到 1
+        m.group(0) = "I"   # 匹配到的内容
+
+        chunk = "I"
+        ids = list(chunk.encode("utf-8"))
+        ids = list(b'I')
+        ids = [73]  # 字符 'I' 的 ASCII 码
+
+        此时 all_ids:
+        all_ids = [73]
+
+        第 2 次循环
+
+        # finditer 找到第二个匹配
+        m = <Match object>
+        m.span() = (1, 3)  # 从索引 1 到 3
+        m.group(0) = "'m"  # 匹配到缩写
+
+        chunk = "'m"
+        ids = list(chunk.encode("utf-8"))
+        ids = list(b"'m")
+        ids = [39, 109]  # 单引号 39, 字母 m 是 109
+
+        此时 all_ids:
+        all_ids = [73, 39, 109] # 假设没有成功合并
+        """
+        for m in self.compiled_pattern.finditer(text):
+            chunk = m.group(0)  # group(0) 返回整个匹配到的字符串
+            ids: list[int] = list(chunk.encode("utf-8"))
+
+            # 贪心算法合并
+            while len(ids) >= 2:
+                best_idx: int | None = None
+                best_new_id: int | None = None
+
+                # 找到最佳 pair 来合并：拥有最小 merged token id 的 pair
+                for i in range(len(ids) - 1):
+                    pair = (ids[i], ids[i + 1])
+                    new_id = self.merges.get(pair)
+                    if new_id is None:
+                        continue
+                    if best_new_id is None or new_id < best_new_id:
+                        best_idx = i
+                        best_new_id = new_id
+
+                # 如果找到适合 merge 的 pair
+                if best_idx is not None and best_new_id is not None:
+                    ids[best_idx] = best_new_id
+                    # 移除下一个 element（被合并消失的那个？）
+                    del ids[best_idx + 1]
+                else:
+                    break
+
+            # 将 ids 拼接到后面
+            all_ids.extend(ids)
+
+        return all_ids
