@@ -210,6 +210,7 @@ class Tokenizer:
         给定列表 [(word1, count1), ..., (wordk, countk)]
         """
 
+    # ---------------- public API ----------------
     def train_from_iterator(
         self,
         iterator: Iterable[str],
@@ -263,17 +264,43 @@ class Tokenizer:
             total_sequences += len(buf)
 
             # Rust 版本中通过 release GIL 实现了并行，这里实现串行版本
+            pattern_obj = self.compiled_pattern
+            assert pattern_obj is not None
+            local: dict[str, int] = {}
+            for s in buf:
+                for m in pattern_obj.finditer(s):
+                    piece = m.group(0)
+                    local[piece] = local.get(piece, 0) + 1
+            
+            # Merge local into global (single-threaded)
+            for k, v in local.items():
+                counts[k] = counts.get(k, 0) + v
+            
+            if exhasuted:
+                break
+        
+        logging.info("Processed %d sequences total, %d unique", total_sequences, len(counts))
+        
+        # Materialize words & counts (byte-level like Rust)
+        words: list[Word] = []
+        cvec: list[int] = []
+        for chunk, c in counts.items():
+            words.append(Word(list(chunk.encode("utf-8"))))
+            cvec.append(c)
+        
+        self.train_core_incremental(words, cvec, vocab_size)
 
     def get_pattern(self) -> str:
         """
         Return 分割文本用的 regex pattern
         """
-        return self.patterns
+        return self.pattern
 
     def get_mergeable_ranks() -> list[tuple[bytes, int]]:
         """
         Return mergable ranks: token bytes -> token id (rank)
         """
+        raise NotImplementedError("Not implemented")
 
     def encode(self, text: str) -> list[int]:
         """
@@ -285,9 +312,9 @@ class Tokenizer:
         3. 重复合并最低 new_id 的 pair 直到没有可合并的 pair
         4. 将所有 resulting ids 跨 chunk 拼接在一起
         """
-        assert self.compiled_pattern is not None, {
+        assert self.compiled_pattern is not None, (
             "Tokenizer not trained: call train_from_iterator first"
-        }
+        )
         all_ids: list[int] = []
 
         # 正则匹配将给定 text 分割成一系列的 chunk
