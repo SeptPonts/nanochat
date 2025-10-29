@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import heapq
 import logging
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
@@ -208,7 +209,99 @@ class Tokenizer:
         """
         Core incremental BPE training logic
         给定列表 [(word1, count1), ..., (wordk, countk)]
+        
+        从调用方的逻辑可以看出，本方法传入的是对语料进行统计之后，得到的 unique words 及其对应的词频。根据词频进行 pair 的合并
         """
+        assert vocab_size >= 256, "vocab_size must be at least 256"
+        num_merges = vocab_size - 256
+        logging.info("Starting BPE training: %d merges to compute", num_merges)
+        self.merges.clear()
+        
+        # ---- initial Pair counting ----
+        logging.info(
+            "Computing initial pair counts from %d unique sequences", len(words)
+        )
+        # pair_counts ➡️ dict[Pair, int] ➡️ value 为 Pair 出现的频率 (全局 word 统计)
+        # where_to_update ➡️ dict[Pair, set[int]] ➡️ value 为含有此 Pair 的 Word 的索引
+        pair_counts, where_to_update = count_pairs_sequential(words, counts)
+        
+        # ---- Build heap ----
+        logging.info("Building heap with %d unique pairs", len(pair_counts))
+        heap: list[MergeJob] = []
+        for pair, pos in where_to_update.items():
+            c = pair_counts.get(pair, 0)
+            if c > 0:
+                heapq.heappush(heap, MergeJob(pair=pair, count=c, pos=set(pos)))
+        # MergeJob 自定义了 __lt__ 方法，让 heapq 最小堆做出了最大堆的效果：count 越大越靠近 heap top，count 一样 pair 值越小越靠近 heap top
+        
+        # ---- Merge loop ----
+        logging.info("Starting merge loop")
+        merges_done = 0
+        last_log_percent = 0
+        
+        while merges_done < num_merges:
+            if not heap:
+                break
+            top = heapq.heappop(heap)
+            
+            # Lazy refresh: If outdated, refresh to current count and reinsert
+            # 注意构成 heap 的 MergeJob 是在训练初始阶段构造的（来源于对语料的全面统计），随着训练开始 pairs 被 merge，有些 pair 的 count 会被影响（甚至消失）；我们出于效率考虑没有选择立即更新整个 heap 被影响的 pairs，而是碰到了再更新
+            current = pair_counts.get(top.pair, 0)
+            if top.count != current:
+                top.count = current
+                if top.count > 0:
+                    heapq.heappush(heap, top)
+                # If refreshed to 0, dont re-insert, but dont break either
+                continue
+            if top.count == 0:
+                break
+            
+            # Record merge: assgin next token id
+            new_id = 256 + merges_done
+            self.merges[top.pair] = new_id
+
+            # Merge this pair in all words where it occurs
+            local_pos_updates: dict[Pair, set[int]] = {}
+            for word_idx in top.pos:
+                changes = words[word_idx].merge_pair(top.pair, new_id)
+                # Update global pair counts based on this word's count
+                c_word = counts[word_idx]
+                for pair, delta in changes:
+                    delta_total = delta * c_word
+                    if delta_total != 0:
+                        pair_counts[pair] = pair_counts.get(pair, 0) + delta_total
+                        if delta > 0:
+                            s = local_pos_updates.get(pair)
+                            if s is None:
+                                s = set()
+                                local_pos_updates[pair] = s
+                            s.add(word_idx)
+            
+            # Add the updated pair counts back to the heap
+            for pair, pos in local_pos_updates.items():
+                cnt = pair_counts.get(pair, 0)
+                if cnt > 0:
+                    heapq.heappush(heap, MergeJob(pair=pair, count=cnt, pos=pos))
+
+            merges_done += 1
+
+            # Log progress every 1%
+            if num_merges > 0:
+                current_percent = (merges_done * 100) // num_merges
+                if current_percent > last_log_percent:
+                    logging.info(
+                        "Progress: %d%% (%d/%d merges) - Last merge: %s -> %d (frequency: %d)",
+                        current_percent,
+                        merges_done,
+                        num_merges,
+                        top.pair,
+                        new_id,
+                        top.count,
+                    )
+                    last_log_percent = current_percent
+
+        logging.info("Finished training: %d merges completed", merges_done)
+
 
     # ---------------- public API ----------------
     def train_from_iterator(
@@ -257,8 +350,8 @@ class Tokenizer:
 
         # Stream ingestion loop: refill buffer, then process sequentially
         while True:
-            exhasuted = refill()
-            if not buf and exhasuted:
+            exhausted = refill()
+            if not buf and exhausted:
                 break
 
             total_sequences += len(buf)
@@ -275,8 +368,8 @@ class Tokenizer:
             # Merge local into global (single-threaded)
             for k, v in local.items():
                 counts[k] = counts.get(k, 0) + v
-            
-            if exhasuted:
+
+            if exhausted:
                 break
         
         logging.info("Processed %d sequences total, %d unique", total_sequences, len(counts))
@@ -296,7 +389,7 @@ class Tokenizer:
         """
         return self.pattern
 
-    def get_mergeable_ranks() -> list[tuple[bytes, int]]:
+    def get_mergeable_ranks(self) -> list[tuple[bytes, int]]:
         """
         Return mergable ranks: token bytes -> token id (rank)
         """
