@@ -5,7 +5,9 @@
       "Bash(git commit:*)",
       "Bash(git log:*)",
       "Bash(git add:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(awk:*)",
+      "Bash(tree:*)"
     ],
     "deny": [],
     "ask": []
