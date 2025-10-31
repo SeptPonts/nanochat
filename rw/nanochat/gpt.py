@@ -142,7 +142,11 @@ class CausalSelfAttention(nn.Module):
             y = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
             
         # Re-assemble the heads side by side and project back to residual stream
+        # 转置 transpose 是为了把刚才为了加速计算倒置的 H 和 T 再倒回去
+        # view 要求 contiguous，也就是内存连续
+        # view 的 -1 指的是维度 2 自动计算
         y = y.transpose(1, 2).contiguous().view(B, T, -1)
+        # 这是个可学习的线性变换，我们期待模型在数据中学习如何融合各个 heads 拼接后的信息
         y = self.c_proj(y)
         return y
             
