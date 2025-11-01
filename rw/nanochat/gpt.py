@@ -183,6 +183,22 @@ class Block(nn.Module):
 class GPT(nn.Module):
     def __init__(self, config):
         super().__init__()
+        self.config = config
+        # ModuleDict 使得我们可以通过名字来管理多个模块, 比如 self.transformer[wte].
+        # wte - Word Token Embedding, h - Hidden Layers
+        self.transformer = nn.ModuleDict(
+            {
+                "wte": nn.Embedding(config.vocab_size, config.n_embd),
+                "h": nn.ModuleList(
+                    [Block(config, layer_idx) for layer_idx in range(config.n_layer)]
+                ),
+            }
+        )
+        # lm_head - Language Model Head 语言模型输出层
+        # 用于将 transfomer 输出的隐藏向量映射到词汇表空间, 用于预测下一个 token
+        # 具体来说, lm_head 的输入是 heads 拼接的结果, 输出是 logits. 从维度的变化上来看, 是个 n_embd ➡️ vocab_size 的映射
+        # 接下来经过 softmax 会被映射成概率分布, 用于从词表中选取 token(采样策略? 可能不会仅仅选取概率最高的)
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
     def init_weights(self):
         pass
