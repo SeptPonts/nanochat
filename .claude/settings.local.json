@@ -7,7 +7,9 @@
       "Bash(git add:*)",
       "Bash(python3:*)",
       "Bash(awk:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(ruff check:*)"
     ],
     "deny": [],
     "ask": []

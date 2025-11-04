@@ -11,6 +11,7 @@ features:
     - Multi-Query Attention (MQA) support for more efficient inference
 """
 
+import math
 from dataclasses import dataclass
 
 import torch
@@ -181,7 +182,7 @@ class Block(nn.Module):
 
 
 class GPT(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config: GPTConfig):
         super().__init__()
         self.config = config
         # ModuleDict 使得我们可以通过名字来管理多个模块, 比如 self.transformer[wte].
@@ -199,12 +200,47 @@ class GPT(nn.Module):
         # 具体来说, lm_head 的输入是 heads 拼接的结果, 输出是 logits. 从维度的变化上来看, 是个 n_embd ➡️ vocab_size 的映射
         # 接下来经过 softmax 会被映射成概率分布, 用于从词表中选取 token(采样策略? 可能不会仅仅选取概率最高的)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        # Rotary embedding 很小 (seq_len * head_dim * 0.5 个 float), 所以与其每次生成时动态扩展, 不如一次性分配 10 倍长度(要是真的超了就让程序崩了吧)
+        self.rotary_seq_len = (
+            config.sequence_len * 10
+        )  # 10X over-compute should be enough, TODO make nicer?
+        head_dim = config.n_embd // config.n_head
+        # 因为 Pytorch 的 meta device 允许初始化模型但不实际分配内存(用于大模型分布式加载), 我们在这用的是"假的" cos/sin, 后面在 init_weights() 方法中才做真实计算(因为到那会才会有真实数据)
+        cos, sin = self._precompute_rotary_embeddings(self.rotary_seq_len, head_dim)
+        # persistent=False 意味着此 buffer不会和 model parameters 一样被保存到 checkpoint
+        # 唯一的判断标准是"这个 buffer 能否从模型的其他部分廉价且确定性地重新计算?如果答案是 yes, 那就不要保存。要保存的一个例子是 BatchNorm's running mean, 这个值是训练过程中积累的统计量, 不能重算
+        self.register_buffer("cos", cos, persistent=False)
+        self.register_buffer("sin", sin, persistent=False)
+        # wte - word token embedding: embedding layer (size: (vocab_size, embd_size))
+        # 从 fp32 转 bf16 ➡️ 节约内存(model 和 activations)
+        self.transformer.wte.to(dtype=torch.bfloat16)
 
     def init_weights(self):
-        pass
+        self.apply(self._init_weights)
+        # zero out classifier weights
+        torch.nn.init.zeros_(self.lm_head.weight)
+        # zero out c_proj weights in all blocks
+        for block in self.transformer.h:
+            torch.nn.init.zeros_(block.mlp.c_proj.weight)
+            torch.nn.init.zeros_(block.attn.c_proj.weight)
+        # init the rotary embeddings
+        head_dim = self.config.n_embd // self.config.n_head
+        cos, sin = self._precompute_rotary_embeddings(self.rotary_seq_len, head_dim)
+        self.cos, self.sin = cos, sin
 
     def _init_weights(self, module):
-        pass
+        if isinstance(module, nn.Linear):
+            # https://arxiv.org/pdf/2310.17813
+            # 具体可以看 notion, 文章要求对权重初始化和梯度更新学习率都根据 fanin fanout 做缩放
+            # 这样才能保证 hideen size 极大的模型的特征学习能力
+            fan_out = module.weight.size(0)
+            fan_in = module.weight.size(1)
+            std = 1.0 / math.sqrt(fan_in) * min(1.0, math.sqrt(fan_out / fan_in))
+            torch.nn.init.normal_(module.weight, mean=0.0, std=std)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=1.0)
 
     def _precompute_rotary_embeddings(self, seq_len, head_dim, base=10000, device=None):
         pass
