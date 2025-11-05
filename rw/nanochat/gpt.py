@@ -242,14 +242,50 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=1.0)
 
+    # TODO: bump base theta more, e.g. 100K is more common more recently
+    # 函数生成了旋转角度速查表, 在真正需要 cos/sin 时直接从表里取数
     def _precompute_rotary_embeddings(self, seq_len, head_dim, base=10000, device=None):
-        pass
+        # autodetect the device from model embeddings
+        if device is None:
+            device = self.transformer.wte.weight.device
+        # stride the channels
+        # head_dim = 64 向量 会被拆成 32 对 2D 向量(每对做独立旋转), 每一对都有不同的旋转频率
+        # 0th pair 频率最高, 旋转快, 编码短期位置差; 31th pair 频率最低, 旋转慢, 编码长期位置差
+        channel_range = torch.arange(0, head_dim, 2, dtype=torch.float32, device=device)
+        inv_freq = 1.0 / (base ** (channel_range / head_dim))
+        # stride the time steps
+        # [0, 1, ..., seq_len-1] 代表每个 token 位置
+        t = torch.arange(seq_len, dtype=torch.float32, device=device)
+        # calculate the roation frequencies at each (time, channel) pair
+        # outer 外积 freqs 是个矩阵, 包含了时间 * 频率的所有组合: 每个元素的含义是第 pos 个 token 在第 channel_pair 维度上的旋转角度(弧度)
+        freqs = torch.outer(t, inv_freq)
+        cos, sin = freqs.cos(), freqs.sin()
+        cos, sin = cos.bfloat16(), sin.bfloat16()
+        # 加维度 broadcasting 的目的是:
+        cos, sin = (
+            cos[None, :, None, :],
+            sin[None, :, None, :],
+        ) # add batch and head dims for later broadcasting
+        return cos, sin
 
     def get_device(self):
         return self.transformer.wte.weight.device
 
     def estimate_flops(self):
-        pass
+        """Return the estimated FLOPs per token for the model. Ref: https://arxiv.org/abs/2204.02311"""
+        nparams = sum(p.numel() for p in self.parameters())
+        nparams_embedding = self.transformer.wte.weight.numel()
+        n_layers, n_heads, head_dim, seq_len = (
+            self.config.n_layer,
+            self.config.n_head,
+            self.config.n_embd // self.config.n_head,
+            self.config.sequence_len,
+        )
+        num_flops_per_token = (
+            6 * (nparams - nparams_embedding) + 12 * n_layers * n_heads * head_dim * seq_len
+        )
+        return num_flops_per_token
+
 
     def setup_optimizers(
         self, unembedding_lr=0.004, embedding_lr=0.2, matrix_lr=0.02, weight_decay=0.0
