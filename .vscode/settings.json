@@ -1,5 +1,6 @@
 {
   "cSpell.enabled": false,
   "cSpell.diagnosticLevel": "none",
-  "editor.suggest.showWords": false
+  "editor.suggest.showWords": false,
+  "python.REPL.enableREPLSmartSend": false
 }

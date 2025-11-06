@@ -13,10 +13,16 @@ features:
 
 import math
 from dataclasses import dataclass
+from functools import partial
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from common import get_dist_info
+from muon import DistMuon
+from torch.optim import AdamW, Muon
+
+from nanochat.adamw import DistAdamW
 
 
 @dataclass
@@ -155,7 +161,7 @@ class CausalSelfAttention(nn.Module):
         y = self.c_proj(y)
         return y
 
-
+# MLP - multi-layer perceptron
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -286,11 +292,56 @@ class GPT(nn.Module):
         )
         return num_flops_per_token
 
-
+    # 注意到不同层使用的 lr (learning rate) 是不一样的
+    # unembedding layer 指的是将最后的隐藏向量映射回词汇表空间的层 (lm_head 线性层)
+    # embedding layer (wte) 是将 token id 映射为向量表示的层
+    # matrix layer 包括所有的 Transformer blocks (mlp/ffn + attention)
+    # weight_decay 用于 AdamW optimizer
     def setup_optimizers(
         self, unembedding_lr=0.004, embedding_lr=0.2, matrix_lr=0.02, weight_decay=0.0
     ):
-        pass
+        model_dim = self.config.n_embd
+        # get 分布式训练参数
+        ddp, rank, _local_rank, _world_size = get_dist_info()
+        # 把所有参数分进 3 groups 里 (matrix, embedding, lm_head)
+        # h - hidden layers, 去看 config 的话不难看出每个 layer 都是 Block
+        # 而 Block 由 CausalSelfAttention 和 MLP 构成
+        matrix_params = list[nn.Parameter](self.transformer.h.parameters())
+        # wte - Word Token Emebdding (nn.Embedding 层)
+        # 用于将 token id 转为向量
+        embedding_params = list[nn.Parameter](self.transformer.wte.parameters())
+        # MHA - multi-head attention
+        lm_head_params = list[nn.Parameter](self.lm_head.parameters())
+        assert len(list[nn.Parameter](self.parameters())) == len(matrix_params) + len(embedding_params) + len(lm_head_params)
+        # 创建 AdamW optimizer for the embedding and lm_head
+        # Scale the LR for the AdamW parameters by ∝1/√dmodel (having tuned the LRs for 768 dim model) - 这里 scale 的依据是 init weights 那里引用的论文 (初始权重和learning rate都需要按照 layer 的 fanin fanout 做 scaling 来确保网络能有效学习)
+        dmodel_lr_scale = (model_dim / 768) ** -0.5
+        if rank == 0:
+            # 对全局第一个进程打印此消息
+            print(
+                f"Scaling the LR for the AdamW parameters ∝1/√({model_dim}/768) = {dmodel_lr_scale:.6f}"
+            )
+        adam_groups = (
+            {"params": lm_head_params, "lr": unembedding_lr * dmodel_lr_scale},
+            {"params": embedding_params, "lr": embedding_lr * dmodel_lr_scale},
+        )
+        adamw_kwargs = {
+            "betas": (0.8, 0.95),
+            "eps": 1e-10,
+            "weight_decay": weight_decay,
+        }
+        AdamWFactory = DistAdamW if ddp else partial[AdamW](torch.optim.AdamW, fused=True)
+        adamw_optimizer = AdamWFactory(adam_groups, **adamw_kwargs)
+        # Create the Muon optimizer for the linear layers
+        muon_kwargs = {"lr": matrix_lr, "momentum": 0.95}
+        MuonFactory = DistMuon if ddp else Muon
+        muon_optimizer = MuonFactory(matrix_params, **muon_kwargs)
+        # Combine the two optimizers into one list
+        optimizers = [adamw_optimizer, muon_optimizer]
+        for opt in optimizers:
+            for group in opt.param_groups:
+                group["initial_lr"] = group["lr"]
+        return optimizers
 
     def forward(self, idx, targets=None, kv_cache=None, loss_reduction="mean"):
         pass
