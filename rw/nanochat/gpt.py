@@ -18,11 +18,10 @@ from functools import partial
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from adamw import DistAdamW
 from common import get_dist_info
-from muon import DistMuon
-from torch.optim import AdamW, Muon
-
-from nanochat.adamw import DistAdamW
+from engine import KVCache
+from muon import DistMuon, Muon
 
 
 @dataclass
@@ -330,7 +329,7 @@ class GPT(nn.Module):
             "eps": 1e-10,
             "weight_decay": weight_decay,
         }
-        AdamWFactory = DistAdamW if ddp else partial[AdamW](torch.optim.AdamW, fused=True)
+        AdamWFactory = DistAdamW if ddp else partial(torch.optim.AdamW, fused=True)
         adamw_optimizer = AdamWFactory(adam_groups, **adamw_kwargs)
         # Create the Muon optimizer for the linear layers
         muon_kwargs = {"lr": matrix_lr, "momentum": 0.95}
@@ -343,8 +342,29 @@ class GPT(nn.Module):
                 group["initial_lr"] = group["lr"]
         return optimizers
 
-    def forward(self, idx, targets=None, kv_cache=None, loss_reduction="mean"):
-        pass
+    def forward(self, 
+                idx : torch.Tensor, 
+                targets : torch.Tensor = None, 
+                kv_cache : KVCache = None, 
+                loss_reduction="mean"):
+        _B, T = idx.size()
+        
+        # 为当前 sequence length 获取 rotary embeddings (shape: (1, seq_len, 1, head_dim))
+        assert T <= self.cos.size(1), (
+            f"Sequence length grew beyond the rotary embeddings cache: {T} > {self.cos.size(1)}"
+        )
+        assert idx.device == self.cos.device, (
+            f"Rotary embeddings and idx are on different devices: {idx.device} != {self.cos.device}"
+        )
+        assert self.cos.dtype == torch.bfloat16, "Rotary embeddings must be in bfloat16"
+        # 如果 kv cache 存在, 我们需要把 rotary embeddings offset 到当前 cache 的位置
+        _T0 = 0 if kv_cache is None else kv_cache.get_pos()
+        
+        
+        
+        
+        
+        
 
     @torch.inference_mode()
     def generate(self, tokens, max_tokens, temperature=1.0, top_k=None, seed=42):
