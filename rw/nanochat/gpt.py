@@ -358,14 +358,72 @@ class GPT(nn.Module):
         )
         assert self.cos.dtype == torch.bfloat16, "Rotary embeddings must be in bfloat16"
         # 如果 kv cache 存在, 我们需要把 rotary embeddings offset 到当前 cache 的位置
-        _T0 = 0 if kv_cache is None else kv_cache.get_pos()
+        T0 = 0 if kv_cache is None else kv_cache.get_pos()
+        cos_sin = (
+            self.cos[:, T0 : T0 + T],
+            self.sin[:, T0 : T0 + T],
+        ) # 把 cache 截断到 seq length T
         
+        # Forward the trunk of the Transformer
+        x = self.transformer.wte(idx)
+        x = norm(x)
+        for block in self.transformer.h:
+            x = block(x, cos_sin, kv_cache)
+        x = norm(x)
         
-        
-        
-        
-        
+        # Forward the lm_head (compute logits)
+        softcap = 15
+        logits = self.lm_head(x)
+        # 处理之后将 logits 限定到 [-softcap, softcap] 之间
+        # 作用: 1. 防止极端值 2. 训练更稳定 3. 避免数值溢出
+        logits = softcap * torch.tanh(logits / softcap)
+        if targets is not None:
+            # traning mode: compute and return the loss
+            # TODO: experiment with Liger Kernels / chunked cross-entropy etc
+            logits = logits.float() # use tf32/fp32 for logits
+            loss = F.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                targets.view(-1),
+                ignore_index=-1,
+                reduction=loss_reduction,
+            )
+            return loss
+        else:
+            # inference mode: compute and return the logits
+            return logits
 
     @torch.inference_mode()
     def generate(self, tokens, max_tokens, temperature=1.0, top_k=None, seed=42):
-        pass
+        """
+        Naive autoregressive straming infefrence.
+        To make it super simple, lets assume:
+        - batch size is 1
+        - ids and the yielded tokens are simple Python lists and ints
+        """
+        assert isinstance(tokens, list)
+        device = self.get_device()
+        rng = None
+        if temperature > 0:
+            rng = torch.Generator(device=device)
+            rng.manual_seed(seed)
+        ids = torch.tensor([tokens], dtype=torch.long, device=device) # add batch dim
+        for _ in range(max_tokens):
+            # naive 方案, 每次都 forward 计算了所有 tokens
+            logits = self.forward(ids) # (B, T, vocab_size)
+            # 只取最新token的logits
+            logits = logits[:, -1, :] # (B, vocab_size)
+            if top_k is not None:
+                # 选 top_k 大的 logits 进入下一筛选阶段
+                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < v[:, [-1]]] = -float("Inf")
+            if temperature > 0:
+                # temperature 越大越有创造性 
+                logits = logits / temperature
+                probs = F.softmax(logits, dim=-1)
+                next_ids = torch.multinomial(probs, num_samples=1, generator=rng)
+            else:
+                # 贪心选择: 直接选概率最大的
+                next_ids = torch.argmax(logits, dim=-1, keepdim=True)
+            ids = torch.cat((ids, next_ids), dim=1)
+            token = next_ids.item()
+            yield token

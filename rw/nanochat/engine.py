@@ -1,3 +1,6 @@
+import torch
+
+
 class KVCache:
     def __init__(self, batch_size, num_heads, seq_len, head_dim, num_layers):
         # 每个 K/V 的 shape 都是 (B, H, T, D), 典型值可能是 (1, 6, 2048, 128)
@@ -11,3 +14,16 @@ class KVCache:
     
     def reset(self):
         self.pos = 0
+    
+    def get_pos(self):
+        return self.pos
+
+    def prefill(self, other):
+        pass
+
+    def insert_kv(self, layer_idx, k, v):
+        pass
+    
+    @torch.inference_mode()
+    def sample_next_token(logits, rng, temperature=1.0, top_k=None):
+        pass
