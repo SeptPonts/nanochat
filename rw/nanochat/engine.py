@@ -1,8 +1,11 @@
 from contextlib import contextmanager
 import torch
+import torch.nn.functional as F
 
 import signal
 import warnings
+from collections import deque
+from .gpt import GPT, GPTConfig
 
 # -----------------------------------------------------------------------------
 # Calculator tool helpers
@@ -138,7 +141,95 @@ class KVCache:
             self.pos = t1
         return key_view, value_view
 
-
+# -----------------------------------------------------------------------------
 @torch.inference_mode()
 def sample_next_token(logits, rng, temperature=1.0, top_k=None):
-    pass
+    """
+    从 logits 中采样下一个 token. (B, vocab_size) ➡️ (B, 1)
+    """
+    assert temperature >= 0.0, "temperature must be non-negative"
+    if temperature == 0.0:
+        return torch.argmax(logits, dim=-1, keepdim=True)
+    if top_k is not None:
+        k = min(top_k, logits.size(-1))
+        vals, idx = torch.topk(logits, k, dim=-1)
+        vals = vals / temperature
+        probs = F.softmax(vals, dim=-1)
+        choice = torch.multinomial(probs, num_samples=1, generator=rng)
+        return idx.gather(1, choice) # 映射回没经过 topk 选取的原始 index
+    else:
+        # temperature 越小会把 logits 的分布形状拉得越陡峭，进而让 sample 出的结果确定性越高
+        logits = logits / temperature
+        probs = F.softmax(logits, dim=-1)
+        return torch.multinomial(probs, num_samples=1, generator=rng)
+
+
+# -----------------------------------------------------------------------------
+class RowState:
+    # 生成过程中 Per-row 状态跟踪
+    def __init__(self, current_tokens=None):
+        self.current_tokens = (
+            current_tokens or []
+        ) # Current token sequence for this row
+        self.forced_tokens = deque() # Queue of tokens to force inject
+        self.in_python_block = False # 是否在 python block 中
+        self.python_expr_tokens = [] # 当前 python 表达式的 tokens
+        self.completed = False # 是否 this row 已经完成了生成
+
+class Engine:
+    def __init__(self, model: GPT, tokenizer):
+        self.model = model
+        self.tokenizer = tokenizer # needed for tool use
+    
+    @torch.inference_mode()
+    def generate(
+        self,
+        tokens,
+        num_samples=1,
+        max_tokens=None,
+        temperature=1.0,
+        top_k=None,
+        seed=42  
+    ):
+        """Same as generate, but does single prefill and then clones the KV cahce."""
+        assert isinstance(tokens, list) and isinstance(tokens[0], int), (
+            "expecting list of ints"
+        )
+        device = self.model.get_device()
+        rng = torch.Generator(device=device)
+        rng.manual_seed(seed)
+        
+        # Get the special tokens we need to coordinate the tool use state machine
+        get_special = lambda s: self.tokenizer.encode_special(s)
+        python_start = get_special("<|python_start|>")
+        python_end = get_special("<|python_end|>")
+        output_start = get_special("<|output_start|>")
+        output_end = get_special("<|output_end|>")
+        assistant_end = get_special("<|assistant_end|>") # if sampled, ends row
+        bos = self.tokenizer.get_bos_token_id() # if sampled, ends row
+        
+        # 1) Run a batch 1 prefill of the prompt tokens
+        m = self.model.config
+        kv_model_kwargs = {
+            "num_heads": m.n_kv_head,
+            "head_dim": m.n_embd // m.n_head,
+            "num_layers": m.n_layer,
+        }
+        kv_cache_prefill = KVCache(
+            batch_size=1,
+            seq_len=len(tokens),
+            **kv_model_kwargs,
+        )
+        # tokens 是 1d list，但是模型期望输入是 (batch_size, seq_len)
+        ids = torch.tensor([tokens], dtype=torch.long, device=device)
+        logits = self.model.forward(ids, kv_cache=kv_cache_prefill)
+        # 只保留最后一个位置的 logits，前面位置的logits只有训练时的损失计算才 care
+        # logits 的 shape 是 (batch_size, num_tokens, vocab_size)
+        logits = logits[:, -1, :]
+        # 处理之后是 (batch_size, vocab_size)
+        next_ids = sample_next_token(logits, rng, temperature, top_k)
+        # next_ids.shape = (batch_size, 1)，取 [:, 0] 后变成 (batch_size,)
+        # .tolist() 后得到 [token1, token2, ...] 而不是 [[token1], [token2], ...]
+        sampled_tokens = next_ids[:, 0].tolist()
+        
+        # 2) Replace the KV cache for each sample/row
