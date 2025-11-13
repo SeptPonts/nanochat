@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import signal
 import warnings
 from collections import deque
+
 from .gpt import GPT, GPTConfig
 
 # -----------------------------------------------------------------------------
@@ -233,3 +234,178 @@ class Engine:
         sampled_tokens = next_ids[:, 0].tolist()
         
         # 2) Replace the KV cache for each sample/row
+        # 完成 prefill 准备 decode
+        kv_length_hint = (
+            # len(tokens) - prompt, max_tokens - 要生成的最大 token 数
+            (len(tokens) + max_tokens) 
+            if max_tokens is not None
+            else self.model.config.sequence_len
+        )
+        kv_cache_decode = KVCache(
+            batch_size=num_samples,
+            seq_len=kv_length_hint,
+            **kv_model_kwargs,
+        )
+        # 复制 prefill 阶段的 kvcache 到新的 cache
+        kv_cache_decode.prefill(kv_cache_prefill)
+        del kv_cache_prefill # 不再需要了
+        
+        # 3) Initialize states for each sample
+        # 多样本并行生成 ➡️ 本质上是生成 n 个不同的回复
+        row_states = [RowState(tokens.copy()) for _ in range(num_samples)]
+        
+        # 4) Main generation loop
+        num_generated = 0
+        first_iteration = True
+        while True:
+            # Stop condition: we've reached max_tokens
+            if max_tokens is not None and num_generated >= max_tokens:
+                break
+            # Stop condition: all rows are completed
+            if all(state.completed for state in row_states):
+                break
+            
+            # Get sampled tokens - either from prefill or from forward pass
+            if first_iteration:
+                # Use the tokens we already sampled from prefill
+                sampled_tokens = [
+                    sampled_tokens[0]
+                ] * num_samples # Broadcast first token to all rows
+                # TODO: we should sample a token for each row instead of broadcasting
+                first_iteration = False
+            else:
+                # Forward the model and get the next token for each row
+                logits = self.model.forward(
+                    ids, kv_cache=kv_cache_decode
+                ) # (B, T, vocab_size)
+                logits = logits[:, -1, :] # (B, vocab_size) at last time step
+                next_ids = sample_next_token(logits, rng, temperature, top_k) # (B, 1)
+                sampled_tokens = next_ids[:, 0].tolist()
+            
+            # Process each row: choose the next token, update state, optional tool use
+            token_column = [] # contains the next token id along each row
+            token_masks = [] # contains the mask (was it sampled (1) or forced (0)?) along each row
+            for i, state in enumerate(row_states):
+                # Select the next token in this row
+                is_forced = (
+                    len(state.forced_tokens) > 0
+                ) # are there tokens waiting to be forced in deque?
+                token_masks.append(
+                    0 if is_forced else 1
+                ) # mask is 0 if forced, 1 if sampled
+                next_token = (
+                    state.forced_tokens.popleft() if is_forced else sampled_tokens[i]
+                )
+                token_column.append(next_token)
+                # Update the state of this row to include the next token
+                state.current_tokens.append(next_token)
+                # On <|assistant_end|> or <|bos|>, mark the row as completed
+                if next_token == assistant_end or next_token == bos:
+                    state.completed = True
+                # Handle tool logic
+                if next_token == python_start:
+                    state.in_python_block = True
+                    state.python_expr_tokens = []
+                elif next_token == python_end and state.in_python_block:
+                    state.in_python_block = False
+                    if state.python_expr_tokens:
+                        expr = self.tokenizer.decode(state.python_expr_tokens)
+                        result = use_calculator(expr)
+                        if result is not None:
+                            result_tokens = self.tokenizer.encode(str(result))
+                            state.forced_tokens.append(output_start)
+                            state.forced_tokens.extend(result_tokens)
+                            state.forced_tokens.append(output_end)
+                    state.python_expr_tokens = []
+                elif state.in_python_block:
+                    state.python_expr_tokens.append(next_token)
+            
+            # Yield the token column
+            yield token_column, token_masks
+            num_generated += 1
+            # Prepare ids for next generation
+            ids = torch.tensor(token_column, dtype=torch.long, device=device).unsqueeze(1)
+    
+    def generate_batch(self, tokens, num_samples=1, **kwargs):
+        """
+        Non-streaming batch generation that just returns the final token sequences.
+        Returns a list of token sequences (list of list of ints).
+        Terminal tokens (assisntant_end, bos) are not included in the results.
+        """
+        assistant_end = self.tokenizer.encode_special("<|assistant_end|>")
+        bos = self.tokenizer.get_bos_token_id()
+        results = [tokens.copy() for _ in range(num_samples)]
+        masks = [[0] * len(tokens) for _ in range(num_samples)]
+        completed = [False] * num_samples
+        for token_column, _token_masks in self.generate(tokens, num_samples, **kwargs):
+            for i, (token, mask) in enumerate(
+                zip(token_column, _token_masks, strict=True)
+            ):
+                if not completed[i]:
+                    if token == assistant_end or token == bos:
+                        completed[i] = True
+                    else:
+                        results[i].append(token)
+                        masks[i].append(mask)
+            # Stop if all rows are completed
+            if all(completed):
+                break
+        return results, masks
+
+if __name__ == "__main__":
+    """
+    Quick inline test to make sure that the naive/slow model.generate function
+    is equivalent to the faster Engine.generate function here.
+    """
+    import time
+    from nanochat.checkpoint_manager import load_model
+    from nanochat.common import compute_init
+
+    # init compute
+    ddp, ddp_rank, ddp_local_rank, ddp_world_size, device = compute_init()
+    # load the model and tokenizer
+    model, tokenizer, meta = load_model("base", device, phase="eval")
+    bos_token_id = tokenizer.get_bos_token_id()
+    # common hperparameters
+    kwargs = {"max_tokens": 64, "temperature": 0.0}
+    # set the starting prompt
+    prompt_tokens = tokenizer.encode(
+        "The chemical formula of water is", prepend=bos_token_id
+    )
+    # generate the reference sequence using the model.generate() function
+    generated_tokens = []
+    torch.cuda.synchronize()
+    t0 = time.time()
+    stream = model.generate(prompt_tokens, **kwargs)
+    for token in stream:
+        generated_tokens.append(token)
+        chunk = tokenizer.decode([token])
+        print(chunk, end="", flush=True)
+    print()
+    torch.cuda.synchronize()
+    t1 = time.time()
+    print(f"Reference time: {t1 - t0:.2f}s")
+    reference_ids = generated_tokens
+    # generate tokens with Engine
+    generated_tokens = []
+    engine = Engine(model, tokenizer)
+    stream = engine.generate(
+        prompt_tokens, num_samples=1, **kwargs
+    ) # note: runs in fp32
+    torch.cuda.synchronize()
+    t0 = time.time()
+    for token_column, _token_masks in stream:
+        token = token_column[0] # only print out the first row
+        generated_tokens.append(token)
+        chunk = tokenizer.decode([token])
+        print(chunk, end="", flush=True)
+    print()
+    torch.cuda.synchronize()
+    t1 = time.time()
+    print(f"Engine time: {t1 - t0:.2f}s")
+    # compare the two sequences
+    for i in range(len(reference_ids)):
+        if reference_ids[i] != generated_tokens[i]:
+            print(f"Mismatch at {i}: {reference_ids[i]} != {generated_tokens[i]}")
+            break
+    print(f"Match: {reference_ids == generated_tokens}")
