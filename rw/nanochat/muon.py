@@ -64,8 +64,30 @@ class Muon(torch.optim.Optimizer):
                 assert g is not None
                 state = self.state[p]
                 if "momentum_buffer" not in state:
-                    pass
+                    state["momentum_buffer"] = torch.zeros_like(g)
+                buf: Tensor = state["momentum_buffer"]
+                buf.lerp_(g, 1 - group["momentum"])
+                g = g.lerp_(buf, group["momentum"]) if group["nesterov"] else buf
+                g = zeropower_via_newtonschulz5(g, steps=group["ns_steps"])
+                p.add(g, alpha=-group["lr"] * max(1, p.size(-2) / p.size(-1)) ** 0.5)
 
 class DistMuon(torch.optim.Optimizer):
+    """
+    Muon: SGD-momentum + (optional) Nesterov, then orthogonalize the 2D update via Newton-Schulz,
+    finally apply aspect-ratio scaled step. Performs its own distributed synchronization:
+        - reduce_scatter(AVG) for gradient averaging
+        - all_gather to replicate updated weights
+
+    Notes:
+        * Designed for 2D parameters (e.g. linear/conv kernels reshaped to 2D). Do not use for 0D/1D
+        * Momentum buffers are maintained only on the owner rank for each parameter (rank chosen by block-cyclic assignment below). If you checkpoint optimizer state on a single rank, consolidate states beforehand.
+        
+    Args:
+        params: iterable of Tensors
+        lr: learning rate
+        momentum: momentum coefficient in [0, 1)
+        nesterov: if True, Nesterov-style update (g <- lerp(g, buf, momentum)); else use buf
+        ns_steps: number of Newton-Schulz iterations for the orthogonalization
+    """
     def __init__(self):
         pass
